@@ -1,0 +1,140 @@
+# Enosys DEX V3 — Flare Pool Registry
+
+Source: `dex-v3-main/src/helpers/pools/flr.ts`
+Fee tiers: LOWEST=100, LOW=500, MEDIUM=3000, HIGH=10000
+
+## Fee tier values
+```
+LOWEST = 100   (0.01%)
+LOW    = 500   (0.05%)
+MEDIUM = 3000  (0.30%)
+HIGH   = 10000 (1.00%)
+```
+
+## Token addresses (quick reference)
+```
+WFLR   / FLR    0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d  dec:18
+USDT0           0xe7cd86e13AC4309349F30B3435a9d337750fC82D  dec:6
+sFLR            0x12e605bc104e93B45e1aD99F9e555f659051c2BB  dec:18
+HLN             0x140D8d3649Ec605CF69018C627fB44cCC76eC89f  dec:18
+APS             0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d  dec:18
+FXRP            0xAd552A648C74D49E10027AB8a618A3ad4901c5bE  dec:6
+CDP             0x6Cd3a5Ba46FA254D4d2E3C2B37350ae337E94a0F  dec:18
+stXRP           0xAd552A648C74D49E10027AB8a618A3ad4901c5bE  dec:6
+EUSDT           0x96B41289D90444B8adD57e6F265DB5aE8651DF29  dec:6
+EETH            0xa76DCDdcE60a442d69Bac7158F3660f50921b122  dec:18
+EQNT            0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77  dec:18
+USDX            0x4A771Cc1a39FDd8AA08B8EA51F7Fd412e73B3d2B  dec:18
+USDC.E(SG)      0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6  dec:6
+USDT(SG)        0x0B38e83B86d491735fEaa0a791F65c2B99535396  dec:6
+```
+
+## Pool registry
+Columns: name | pool address | fee | native | rflr | activeRewardManager (last in array)
+
+```javascript
+// Copy-paste ready for implementation — rewardManagers array is full list;
+// always use the LAST entry as the active manager.
+
+const POOL_REGISTRY = [
+  { name:"FXRP - stXRP",         address:"0xa4cE7dAfC6fB5acEEDd0070620b72aB8f09b0770", fee:500,   tokens:["0x4C18Ff3C89632c3Dd62E796c0aFA5c07c4c1B2b3","0xAd552A648C74D49E10027AB8a618A3ad4901c5bE"], rewardManagers:[], native:false, rflr:true },
+  { name:"CDP - USDT0",          address:"0x975f0369d31f1dD79ABF057Ad369AE7d5B9F6FB4", fee:500,   tokens:["0x6Cd3a5Ba46FA254D4d2E3C2B37350ae337E94a0F","0xe7cd86e13AC4309349F30B3435a9d337750fC82D"], rewardManagers:["0xfeFf766dD2420D13dCCc3bAF15Fb0E69Dc163Db2","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:false, rflr:true },
+  { name:"FXRP - WFLR",         address:"0xb4CB11a84CFbd8F6336Dc9417aC45c1F8E5B59E7", fee:3000,  tokens:["0xAd552A648C74D49E10027AB8a618A3ad4901c5bE","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:["0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:true,  rflr:true },
+  { name:"FXRP - HLN",          address:"0x38C46a6753b4EcD8C8a6d7E1859448669259C533", fee:3000,  tokens:["0xAd552A648C74D49E10027AB8a618A3ad4901c5bE","0x140D8d3649Ec605CF69018C627fB44cCC76eC89f"], rewardManagers:["0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:false, rflr:false },
+  { name:"FXRP - APS",          address:"0x50aA2b9E933E08F829Ee133288F761C76a4ccB5d", fee:3000,  tokens:["0xAd552A648C74D49E10027AB8a618A3ad4901c5bE","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:["0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:false, rflr:false },
+  { name:"FXRP - USDT0",        address:"0x686f53F0950Ef193C887527eC027E6A574A4DbE1", fee:3000,  tokens:["0xAd552A648C74D49E10027AB8a618A3ad4901c5bE","0xe7cd86e13AC4309349F30B3435a9d337750fC82D"], rewardManagers:[], native:false, rflr:true },
+  { name:"HLN - USDT0",         address:"0xA7C9E7343bD8f1eb7000F25dE5aeb52c6B78B1b7", fee:3000,  tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0xe7cd86e13AC4309349F30B3435a9d337750fC82D"], rewardManagers:["0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:false, rflr:true },
+  { name:"APS - USDT0",         address:"0x53dA461898C40466E84ad6Be7d53Cdf360EEeaEd", fee:3000,  tokens:["0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d","0xe7cd86e13AC4309349F30B3435a9d337750fC82D"], rewardManagers:["0x32cfFdCc30EE0cC04c314550565035a7eB76DDDC","0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:false, rflr:false },
+  { name:"HLN - WFLR (100)",    address:"0x3De8C22790549F323313d513Df2A1cb30b28B9A4", fee:100,   tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:[], native:true,  rflr:false },
+  { name:"HLN - WFLR (500)",    address:"0x67630B163d7CE9d10F002aDd4C7F80D859cFCC48", fee:500,   tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:[], native:true,  rflr:false },
+  { name:"HLN - WFLR (3000)",   address:"0x7666Ab2482257578113194b9A5e9D3bd7dC759d9", fee:3000,  tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:["0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:true,  rflr:false },
+  { name:"HLN - WFLR (10000)",  address:"0x5e823faF1B9661B5bDd988A4Cb0b269F2908f11d", fee:10000, tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - USDT0",        address:"0x3C2a7B76795E58829FAAa034486D417dd0155162", fee:3000,  tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xe7cd86e13AC4309349F30B3435a9d337750fC82D"], rewardManagers:[], native:true,  rflr:true },
+  { name:"USDC.E(SG) - USDT0",  address:"0xa4a4182219258c707253fdFD5C4aee2774c02C68", fee:100,   tokens:["0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6","0xe7cd86e13AC4309349F30B3435a9d337750fC82D"], rewardManagers:[], native:true,  rflr:false },
+  { name:"USDT0 - USDX",        address:"0x969439864989d07AFa7CAb546dA46507d453AE1d", fee:500,   tokens:["0xe7cd86e13AC4309349F30B3435a9d337750fC82D","0x4A771Cc1a39FDd8AA08B8EA51F7Fd412e73B3d2B"], rewardManagers:[], native:true,  rflr:true },
+  { name:"SFLR - WFLR (100)",   address:"0x4F5dF684a9177F612DFd3697A71b782020DE1940", fee:100,   tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:[], native:true,  rflr:false },
+  { name:"SFLR - WFLR (500)",   address:"0x25B4f3930934F0A3CbB885C624EcEe75a2917144", fee:500,   tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:[], native:true,  rflr:true },
+  { name:"SFLR - WFLR (3000)",  address:"0x46Ff03Da3081e5976eEFF542Cdaa6453D2dD1286", fee:3000,  tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:true,  rflr:false },
+  { name:"SFLR - WFLR (10000)", address:"0x71f62232D470f87ad8DB616fb68b0a69B5A3b594", fee:10000, tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - APS (100)",    address:"0xE83C2F29357a4E0d01700F9cffbBc11D8412E79B", fee:100,   tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - APS (500)",    address:"0x0F750c12e0D89DB35353eb89E64a25629751E31A", fee:500,   tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - APS (3000)",   address:"0xAFF8e67248E81eb63941b7eF769758e42cEf9189", fee:3000,  tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:["0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:true,  rflr:false },
+  { name:"WFLR - APS (10000)",  address:"0x04Af25eF7AEf113a5Da24124f69deDb8a88e8656", fee:10000, tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - EUSDT (100)",  address:"0x144fe54c31443163B0f2b95De9Eb25236F989F3d", fee:100,   tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - EUSDT (500)",  address:"0xd0fF204B0Bc91C45987568DbF12fA24445A93453", fee:500,   tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - EUSDT (3000)", address:"0xcAA52e02504E6C637E307e0a3d9675e659016CD8", fee:3000,  tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:["0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:true,  rflr:false },
+  { name:"WFLR - EUSDT (10000)",address:"0x67257323AB9c84EA47206632d01A9D859251139a", fee:10000, tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - EETH (100)",   address:"0x60F0Ff4Ec745D15a6BF1c3Ae22AfEa3AcAEe3a2d", fee:100,   tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - EETH (500)",   address:"0x1a1d635B9560c19d56a011f9427aED17bBC422F0", fee:500,   tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - EETH (3000)",  address:"0x507Ba799d81c8e7848FA4e0c966bF96a7e28B5CD", fee:3000,  tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:["0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:true,  rflr:false },
+  { name:"WFLR - EETH (10000)", address:"0x9Ed5C780D8ECa10b2e0160b9cae97fc8173c7C3a", fee:10000, tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - EQNT (100)",   address:"0x6511819066263F169966A205cb152fCE566da54b", fee:100,   tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - EQNT (500)",   address:"0x56c6c74324EC898aEb7BCECC54Fd16dB90088C9f", fee:500,   tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77"], rewardManagers:[], native:true,  rflr:false },
+  { name:"WFLR - EQNT (3000)",  address:"0xe6FbAB907141A578C51326C25300950a1C38B27c", fee:3000,  tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77"], rewardManagers:["0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:true,  rflr:false },
+  { name:"WFLR - EQNT (10000)", address:"0x07F40cf448c25B391fceB455A5cf93Fd4E7FD082", fee:10000, tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77"], rewardManagers:[], native:true,  rflr:false },
+  { name:"HLN - APS (100)",     address:"0x85e80E0C8f6969F458E37249D021E6D478B74242", fee:100,   tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - APS (500)",     address:"0x6A84a0d1a48B17a46D1553ea8A2be3D3EF227aa3", fee:500,   tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - APS (3000)",    address:"0xe388298DFcc0Da8f81582E2c4F7Df92B46703a83", fee:3000,  tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:["0x02e55904F4bbB4ef6CF036bd203Dd2B0D4B86e16","0x38B542B05198aE2c8A16520B9f8A208b6552B77a"], native:false, rflr:false },
+  { name:"HLN - APS (10000)",   address:"0xA6e32137CaCB5EFf9846B9af8e435abea6a15CC0", fee:10000, tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - EUSDT (100)",   address:"0xba01ae7Be22C5fE0f87C805c1302a2487547114c", fee:100,   tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - EUSDT (500)",   address:"0xF6E21Ba98AE34FE5fD1b296fAAdd20251bb801E2", fee:500,   tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - EUSDT (3000)",  address:"0x5FFD30c3893F9606CfEC9c87BFf2988860678d17", fee:3000,  tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"HLN - EUSDT (10000)", address:"0x580b3E27294DAf58ea6b8B9aC62fAecFEbe69644", fee:10000, tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - EETH (100)",    address:"0xeC97b3C78a2D70cf229387a9f2B6f5D226Dfa819", fee:100,   tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - EETH (500)",    address:"0xCBECf3eE5F1C63f3E0E360622B0FabD926FbB4e1", fee:500,   tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - EETH (3000)",   address:"0xc41939F37B31BF1f2FCEFC1CA89B5bf46a8713D0", fee:3000,  tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"HLN - EETH (10000)",  address:"0x279563f6b7162B57B90c9D382f63554056496b3F", fee:10000, tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - EQNT (100)",    address:"0xed4D5723f0Ca93D3Fde93b2AF6C32e06De61EF57", fee:100,   tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - EQNT (500)",    address:"0xc62356aEfB31AD6C282e5453798755fc18F97700", fee:500,   tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77"], rewardManagers:[], native:false, rflr:false },
+  { name:"HLN - EQNT (3000)",   address:"0xBdd80C82000151f355e523FED0b5Fa32a07d12a1", fee:3000,  tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"HLN - EQNT (10000)",  address:"0x7Bd497D2af21e25F28F57bdd1Caf2d453B5a7272", fee:10000, tokens:["0x140D8d3649Ec605CF69018C627fB44cCC76eC89f","0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77"], rewardManagers:[], native:false, rflr:false },
+  { name:"SFLR - HLN (100)",    address:"0xd752C58D595ab636a52c119FebEa856f8E2a4DAF", fee:100,   tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x140D8d3649Ec605CF69018C627fB44cCC76eC89f"], rewardManagers:[], native:false, rflr:false },
+  { name:"SFLR - HLN (500)",    address:"0x4ee92e94c63E9D0C44aA589C8ED75Aae46c252b9", fee:500,   tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x140D8d3649Ec605CF69018C627fB44cCC76eC89f"], rewardManagers:[], native:false, rflr:false },
+  { name:"SFLR - HLN (3000)",   address:"0x942a493FE65172e42D276d07a612b678914EA402", fee:3000,  tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x140D8d3649Ec605CF69018C627fB44cCC76eC89f"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"SFLR - HLN (10000)",  address:"0xCc2e79709Ab4628C95B4a3977c8e19FdBbA5275c", fee:10000, tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x140D8d3649Ec605CF69018C627fB44cCC76eC89f"], rewardManagers:[], native:false, rflr:false },
+  { name:"EUSDT - APS (100)",   address:"0xedB5815760cFc9A66DC1eD297CE51e3906521ed9", fee:100,   tokens:["0x96B41289D90444B8adD57e6F265DB5aE8651DF29","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"EUSDT - APS (500)",   address:"0x7b941228ef9930028AC1cDE7608B4a1167A3C81D", fee:500,   tokens:["0x96B41289D90444B8adD57e6F265DB5aE8651DF29","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"EUSDT - APS (3000)",  address:"0xcF93d54E7Fea895375667Fa071d5b48C81E76d7d", fee:3000,  tokens:["0x96B41289D90444B8adD57e6F265DB5aE8651DF29","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"EUSDT - APS (10000)", address:"0x4ED21C876AE0dFe4152FcB47FDdf600979e4e215", fee:10000, tokens:["0x96B41289D90444B8adD57e6F265DB5aE8651DF29","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"EETH - APS (100)",    address:"0x9d2dD5609735FF34fB42943A65c356b18c7FE09e", fee:100,   tokens:["0xa76DCDdcE60a442d69Bac7158F3660f50921b122","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"EETH - APS (500)",    address:"0xF2710AE8698b8F558D2674D9De1D56B000f1D6F2", fee:500,   tokens:["0xa76DCDdcE60a442d69Bac7158F3660f50921b122","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"EETH - APS (3000)",   address:"0x71951DaC21f1f531C1b0F7F685875c269f7596F9", fee:3000,  tokens:["0xa76DCDdcE60a442d69Bac7158F3660f50921b122","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"EETH - APS (10000)",  address:"0xf1Ded0635eC9B86d717cD384384e237d99456CB4", fee:10000, tokens:["0xa76DCDdcE60a442d69Bac7158F3660f50921b122","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"EQNT - APS (100)",    address:"0xce629B3EA0ccABa57581Be1F24553e0471E1b9B7", fee:100,   tokens:["0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"EQNT - APS (500)",    address:"0xbf2A33508F938Ef4AEacce32a61E187e357C403e", fee:500,   tokens:["0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"EQNT - APS (3000)",   address:"0xC9e27A759bFE2e518c133E1445B8b4D5DB05C824", fee:3000,  tokens:["0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"EQNT - APS (10000)",  address:"0x354CA4925855470AaD17fd64c7F859F8E4EAFA56", fee:10000, tokens:["0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"SFLR - APS (100)",    address:"0xD1Aa0EB37D6D36fDe28477612290f022F51091B8", fee:100,   tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"SFLR - APS (500)",    address:"0xF8dEc7f942f92d59310a7373F431aca12B4835eE", fee:500,   tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"SFLR - APS (3000)",   address:"0x4dDC7854E0d3008D2B85e5Ed1529D726711ED05C", fee:3000,  tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"SFLR - APS (10000)",  address:"0xE29b7231E99dafBa5Decdaf8168bA2AaCD11A100", fee:10000, tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0xfF56Eb5b1a7FAa972291117E5E9565dA29bc808d"], rewardManagers:[], native:false, rflr:false },
+  { name:"SFLR - EUSDT (100)",  address:"0x8DeDf787E59b3797A80A5fd6711146320bD8E198", fee:100,   tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:false, rflr:false },
+  { name:"SFLR - EUSDT (500)",  address:"0x834Fd9992546245d6a67cc76FEad1A2AB850D045", fee:500,   tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:false, rflr:false },
+  { name:"SFLR - EUSDT (3000)", address:"0x5d03162f2623D98f21f30DD5024d0e6E243b0e3a", fee:3000,  tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"SFLR - EUSDT (10000)",address:"0x1607844E3DF089eCca3F6F8439cb893fbEE69f36", fee:10000, tokens:["0x12e605bc104e93B45e1aD99F9e555f659051c2BB","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:false, rflr:false },
+  { name:"EUSDT - EETH (100)",  address:"0x084011C4bB22Cb752DfD844Fbb1a0637d1807f62", fee:100,   tokens:["0x96B41289D90444B8adD57e6F265DB5aE8651DF29","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:[], native:false, rflr:false },
+  { name:"EUSDT - EETH (500)",  address:"0xda0Cb5787Fc3bF46A2796cc0DC85899A806f1910", fee:500,   tokens:["0x96B41289D90444B8adD57e6F265DB5aE8651DF29","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:[], native:false, rflr:false },
+  { name:"EUSDT - EETH (3000)", address:"0x27A0B5C401B075679e60414c29e7F37FefBC8335", fee:3000,  tokens:["0x96B41289D90444B8adD57e6F265DB5aE8651DF29","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"EUSDT - EETH (10000)",address:"0x3140095E017c34f7f95f1587646b5a82c8bB1Ab9", fee:10000, tokens:["0x96B41289D90444B8adD57e6F265DB5aE8651DF29","0xa76DCDdcE60a442d69Bac7158F3660f50921b122"], rewardManagers:[], native:false, rflr:false },
+  { name:"EQNT - EUSDT (100)",  address:"0x57F302640e1b76875C8A40269C1D126E12844CAd", fee:100,   tokens:["0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:false, rflr:false },
+  { name:"EQNT - EUSDT (500)",  address:"0x82D089d843D554217988b2EDf8b5983219ed01f7", fee:500,   tokens:["0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:false, rflr:false },
+  { name:"EQNT - EUSDT (3000)", address:"0xebeA6Ac660313F03AB628c42747635b797337172", fee:3000,  tokens:["0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:["0x99Cb251D23b333C0Cd6CF72f574F08ECeB4ABf84"], native:false, rflr:false },
+  { name:"EQNT - EUSDT (10000)",address:"0xBb53f7c19A20DC57D2900e488F19967d6D4FcFAf", fee:10000, tokens:["0x60fDC7B744E886e96Aa0DEf5f69eE440dB9d8c77","0x96B41289D90444B8adD57e6F265DB5aE8651DF29"], rewardManagers:[], native:false, rflr:false },
+  { name:"WFLR - USDC.E(SG) 100", address:"0x71BfCf1A83A9b5786Aa84893bD95EDcFC7CC458f", fee:100, tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6"], rewardManagers:[], native:true, rflr:false },
+  { name:"WFLR - USDC.E(SG) 500", address:"0xa882672fB51FE51B082187dd83Af133910025d90", fee:500, tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6"], rewardManagers:[], native:true, rflr:false },
+  { name:"WFLR - USDC.E(SG) 3000",address:"0x164857e59CdE0848910Dac791650Da52db736dc2", fee:3000, tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6"], rewardManagers:[], native:true, rflr:false },
+  { name:"WFLR - USDC.E(SG) 10000",address:"0x619369b93f68BB97dD7e685BA592381F2D5B884d",fee:10000,tokens:["0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d","0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6"], rewardManagers:[], native:true, rflr:false },
+  { name:"USDT(SG) - WFLR 100", address:"0x69a12Fd86E2CdD6A5f798D1c35A0E01B6794B6D0", fee:100, tokens:["0x0B38e83B86d491735fEaa0a791F65c2B99535396","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:[], native:true, rflr:false },
+  { name:"USDT(SG) - WFLR 500", address:"0xF1e90b835dFcEE18163F1EE064a73Ff9737d8Edb", fee:500, tokens:["0x0B38e83B86d491735fEaa0a791F65c2B99535396","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:[], native:true, rflr:false },
+  { name:"USDT(SG) - WFLR 3000",address:"0x4a885Ed3EC3F3E657440422e93C15A73EdF6A909", fee:3000, tokens:["0x0B38e83B86d491735fEaa0a791F65c2B99535396","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:[], native:true, rflr:false },
+  { name:"USDT(SG) - WFLR 10000",address:"0xb968c6c15E2990A334B720D55821CFf471f31Dde",fee:10000,tokens:["0x0B38e83B86d491735fEaa0a791F65c2B99535396","0x1D80c49BbBCd1C0911346656B529DF9E5c2F783d"], rewardManagers:[], native:true, rflr:false },
+  { name:"USDC.E(SG)-USDT(SG) 100",address:"0x6808F7C02Ec7E3BeE4159c124362F912D115D568",fee:100,tokens:["0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6","0x0B38e83B86d491735fEaa0a791F65c2B99535396"], rewardManagers:[], native:false, rflr:false },
+  { name:"USDT(SG)-USDC.E(SG) 500",address:"0x9ba3E13E581de917A6E5E0a70037628679d0dA3C",fee:500,tokens:["0x0B38e83B86d491735fEaa0a791F65c2B99535396","0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6"], rewardManagers:[], native:false, rflr:false },
+  { name:"USDC.E(SG)-USDT(SG) 3000",address:"0xE31B9c8Cd35464CD7C23C48E95EcBaD5A78a3DeB",fee:3000,tokens:["0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6","0x0B38e83B86d491735fEaa0a791F65c2B99535396"], rewardManagers:[], native:false, rflr:false },
+  { name:"USDT(SG)-USDC.E(SG) 10000",address:"0xC3f02dCD3EeC0D20eeDab27572A2d10486b17061",fee:10000,tokens:["0x0B38e83B86d491735fEaa0a791F65c2B99535396","0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6"], rewardManagers:[], native:false, rflr:false },
+  { name:"USDC.E(SG) - USDX 100",address:"0x7978455aE7c042c720BB70b65913a66D828eDe74",fee:100,tokens:["0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6","0x4A771Cc1a39FDd8AA08B8EA51F7Fd412e73B3d2B"], rewardManagers:[], native:false, rflr:false },
+  { name:"USDC.E(SG) - USDX 500",address:"0x94fc6c22dD8f70c7FC9EB7830619E74Fed937E4c",fee:500,tokens:["0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6","0x4A771Cc1a39FDd8AA08B8EA51F7Fd412e73B3d2B"], rewardManagers:[], native:false, rflr:false },
+  { name:"USDC.E(SG) - USDX 3000",address:"0x130Bc3C6Ab530A56B7B7dc926A8E33C1E0eCA472",fee:3000,tokens:["0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6","0x4A771Cc1a39FDd8AA08B8EA51F7Fd412e73B3d2B"], rewardManagers:[], native:false, rflr:false },
+  { name:"USDC.E(SG) - USDX 10000",address:"0xF6d1b8fcd9D324Ab118Cba5BcD6040101f75fb8D",fee:10000,tokens:["0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6","0x4A771Cc1a39FDd8AA08B8EA51F7Fd412e73B3d2B"], rewardManagers:[], native:false, rflr:false },
+]
+```
