@@ -97,7 +97,6 @@ Apply this to every write-action button.
 | Chain | Public RPC | `eth_getLogs` cap |
 |---|---|---|
 | Flare | `https://flare-api.flare.network/ext/C/rpc` | **30 blocks** |
-| Flare (REDACTED mirror, third-party) | `https://REDACTED-RPC/ext/bc/C/rpc` | Higher (no documented cap) |
 | Songbird | `https://songbird-api.flare.network/ext/C/rpc` | **30 blocks** |
 | Coston2 | `https://coston2-api.flare.network/ext/C/rpc` | **30 blocks** |
 
@@ -109,8 +108,8 @@ public RPC will throw `block range too wide`. Either:
 - Use **Ankr** (paid tier) — lifts to ~5,000 blocks per request.
 - Run a **self-hosted node**.
 
-The Enosys skills assume access to private Flare RPCs (`REDACTED-RPC`).
-Third-party builders don't have that — plan for the public-RPC cap from day one.
+Plan for the public-RPC `eth_getLogs` cap from day one — assume 30 blocks is your
+default and design history-dependent features around that.
 
 ### Ankr's API key is origin-locked for browser safety
 

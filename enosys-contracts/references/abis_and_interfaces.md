@@ -338,15 +338,12 @@ await universalRouter.execute(commands, inputs, deadline);
 
 ---
 
-## Enosys Private RPCs (from source code)
+## RPC endpoints
 
-These are Enosys's own RPC nodes, used in their frontends:
-- **Flare**: `https://REDACTED-RPC/ext/bc/C/rpc`
-- **Songbird**: `https://REDACTED-RPC/ext/bc/C/rpc`
-- **Coston2**: `https://REDACTED-RPC/ext/bc/C/rpc`
-- **Coston1**: `https://REDACTED-RPC/ext/bc/C/rpc`
-
-Public alternatives: use `https://flare-api.flare.network/ext/C/rpc` etc.
+Use the public Flare Foundation endpoints, or your own provider key (Ankr, etc.) for higher rate limits and larger `eth_getLogs` ranges:
+- **Flare**: `https://flare-api.flare.network/ext/C/rpc`
+- **Songbird**: `https://songbird-api.flare.network/ext/C/rpc`
+- **Coston2**: `https://coston2-api.flare.network/ext/C/rpc`
 
 ---
 

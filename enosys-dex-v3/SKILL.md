@@ -29,8 +29,7 @@ for the full breakdown.
 
 ```
 Chain ID:     14 (0xe)
-RPC:          https://REDACTED-RPC/ext/bc/C/rpc
-RPC fallback: https://flare-api.flare.network/ext/C/rpc
+RPC:          https://flare-api.flare.network/ext/C/rpc
 Explorer:     https://flare-explorer.flare.network
 ```
 

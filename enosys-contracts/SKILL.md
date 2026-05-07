@@ -293,8 +293,7 @@ const troveManager = new ethers.Contract(
 10. **Governance voting power**: In `EnosysGovernorDual`, `1 APS = 10,000 HLN` in vote weight. Tokens must be **staked** in the StakeManager to vote — holding in wallet doesn't count.
 11. **Fee tier → tick spacing**: 100 bps → spacing 1, 500 bps → spacing 10, 3000 bps → spacing 60, 10000 bps → spacing 200. Tick ranges in `mint()` must be multiples of the tick spacing.
 12. **Universal Router**: Supports batched V2+V3 swaps and ETH wrapping in one tx. Command bytes from `Commands.sol`: `0x00`=V3_EXACT_IN, `0x01`=V3_EXACT_OUT, `0x08`=V2_EXACT_IN, `0x0b`=WRAP_ETH. Available on Songbird (`0xfc737fa...`) and Coston1 (`0xc97ff9a...`).
-13. **Enosys private RPCs** (used in their own frontends, generally faster): Flare: `https://REDACTED-RPC/ext/bc/C/rpc`, Songbird: `https://REDACTED-RPC/ext/bc/C/rpc`, Coston2: `https://REDACTED-RPC/ext/bc/C/rpc`.
-14. **Solidity version**: DEX V3 contracts use `pragma solidity =0.7.6`. Governance and APYCloud use `^0.8.13`. Keep this in mind when writing integrating contracts or copying interfaces.
+13. **Solidity version**: DEX V3 contracts use `pragma solidity =0.7.6`. Governance and APYCloud use `^0.8.13`. Keep this in mind when writing integrating contracts or copying interfaces.
 
 ---
 
