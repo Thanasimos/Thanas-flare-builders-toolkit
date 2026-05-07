@@ -49,7 +49,6 @@ coston:   https://coston-api.flare.network/ext/C/rpc
 | Provider | Notes |
 |---|---|
 | **Ankr (paid tier)** | `https://rpc.ankr.com/flare/<KEY>` — domain-locked browser keys (origin-restricted); separate IP-locked key needed for server-side scripts/forge. Lifts `eth_getLogs` to ~5k blocks. |
-| **REDACTED mirror** | `https://REDACTED-RPC/ext/bc/C/rpc` — community-run Flare-only mirror, useful when public RPC rate-limits hit during Foundry fork tests. |
 
 **Origin lock note** — a browser-locked Ankr key returns `Origin not allowed (-32079)` to curl / forge-script. Use the public RPC for deploys; reserve Ankr for browser code.
 
@@ -352,7 +351,6 @@ fs_permissions = [{ access = "read", path = "config/" }]
 
 [rpc_endpoints]
 flare      = "https://flare-api.flare.network/ext/C/rpc"
-flare_fast = "https://REDACTED-RPC/ext/bc/C/rpc"
 songbird   = "https://songbird-api.flare.network/ext/C/rpc"
 coston2    = "https://coston2-api.flare.network/ext/C/rpc"
 ```
