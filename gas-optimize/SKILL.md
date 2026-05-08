@@ -237,6 +237,59 @@ solidity: {
 }
 ```
 
+### Category 6.5: EIP-170 contract size pressure (Flare-specific common case)
+
+Flare contracts that integrate FAssets, FTSO, and Enosys V3 routinely hit the 24,576-byte runtime cap because each subsystem brings non-trivial interface surface plus its own decoding logic. When `forge build --sizes` shows a contract over the cap (or within ~500 bytes), the most-impactful technique is **`external` library extraction** — moving heavy pure/view logic into an `external library` deployed separately and DELEGATECALL'd in.
+
+**Why DELEGATECALL works for libraries**: `external library` functions execute in the caller's storage context. `address(this)`, `msg.sender`, balances, and storage slot reads/writes all behave identically inside the library call. The library bytecode is deployed once, the LST contract just stores a 20-byte address pointer and pays a single DELEGATECALL per library invocation (~700 gas overhead).
+
+**Pattern**:
+
+Before — heavy logic inlined:
+```solidity
+contract Heavy {
+    function _statusMarkdown(address agent, uint256 mintedUBA, ...)
+        internal view returns (uint256)
+    {
+        // 200+ lines of FTSO + AM + math
+    }
+}
+// Bytecode: 24,659 bytes (over cap).
+```
+
+After — heavy logic in `external library`:
+```solidity
+library MathLib {
+    function statusMarkdown(IAssetManager am, address agent, ...)
+        external view returns (uint256)
+    {
+        // Same 200+ lines, now in a separately-deployed contract.
+    }
+}
+
+contract Heavy {
+    function _statusMarkdown(address agent, ...) internal view returns (uint256) {
+        return MathLib.statusMarkdown(am, agent, ...);
+    }
+}
+// Heavy bytecode: 23,893 bytes (683 byte headroom).
+// MathLib bytecode: 6,583 bytes (separately deployed, linked at deploy time).
+```
+
+**Picking what to extract**:
+- Pure/view functions with non-trivial logic (FTSO scaling, status markdown, swap pipeline, AM-call wrappers).
+- Functions that the contract uses 1-3 times — extracting once-used functions gains the most per-byte.
+- AVOID extracting functions that are called inside very hot loops (the DELEGATECALL overhead compounds).
+
+**Caveats**:
+- `external library` cannot be deployed via `forge create` directly — it auto-links at compile time. For deploy scripts, use `vm.startBroadcast()` then `new Heavy(...)` and Foundry handles the linking. For dry-runs of multi-step deploys that include library calls, **split the deploy script** — running a library-deploy + library-call in the same `forge script` simulation can fail to register the library bytecode before the subsequent calls execute. Real `--broadcast` handles either path; splitting just keeps both phases dry-runnable.
+- Slither's reentrancy detector flags balance-delta patterns inside library functions. Categorically a false positive when the function is called from a `nonReentrant` outer.
+- Some IDE tooling doesn't recognize delegated library calls in coverage maps — your library code may show 0% coverage even when fully exercised. This is a tooling artifact, not a real coverage gap.
+
+**When NOT to use this technique**:
+- If the contract is ≤22KB, leave it inlined. The DELEGATECALL overhead is real (~700 gas) and library deploys add another 21k base + bytecode cost. Only worth it when EIP-170 is actually pressing.
+- If the heavy logic mutates many storage slots (DELEGATECALL is fine for this, but reasoning about which contract owns the slots gets harder).
+
 ### Category 7: L2-specific considerations
 
 When targeting L2s (Base, Arbitrum, Optimism, zkSync):

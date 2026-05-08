@@ -517,13 +517,35 @@ this warning.
 ### WFLR transfer hooks
 
 WFLR's `transfer` / `transferFrom` invoke an FTSO delegation-state hook
-(`updateAtTokenTransfer`). If a recipient address has zero delegation state (e.g.,
-freshly `deal`'d in a Foundry fork test without a real `WFLR.deposit{value: ...}`
-call), the hook reverts with `SafeMath: subtraction overflow`.
+(`updateAtTokenTransfer`). The hook is **internal state-only on the WFLR
+contract itself** — it does NOT call into the recipient. A recipient that
+reverts in `receive()`/`fallback()` cannot block delivery. Empirically
+verified 2026-05-08 with a Flare-fork test (`WFLR.transfer(evil, 1 ether)`
+to a contract whose `receive()` reverts succeeds).
+
+The hook DOES revert with `SafeMath: subtraction overflow` when a SENDER
+has phantom balance (`deal(WFLR, addr, X)` writes the balance slot but
+skips the delegation state init). That's a **test-setup pitfall, not a
+production DoS surface**.
 
 Test setup correction: use `vm.deal(user, X)` + `vm.prank(user); WFLR.deposit{value:
 X}()` instead of `deal(WFLR, user, X)`. The latter writes the balance slot but
 skips the delegation state init.
+
+**Implication for audit findings**: claims that protocol-fee `safeTransfer`
+of WFLR can be DoS'd by a malicious recipient are **categorically false
+positives**. Add a fork test to lock the answer down before re-litigation:
+
+```solidity
+function test_WflrSafeTransfer_ToRevertingReceiver_Succeeds() external {
+    vm.createSelectFork("flare");
+    vm.deal(address(this), 10 ether);
+    IWNat(WFLR).deposit{value: 10 ether}();
+    address evil = address(new RevertingReceiver()); // receive() reverts
+    IERC20(WFLR).safeTransfer(evil, 1 ether);        // succeeds
+    assertEq(IERC20(WFLR).balanceOf(evil), 1 ether);
+}
+```
 
 ### Token decimals
 
@@ -594,6 +616,69 @@ must enforce TWO layers:
 Both layers AND-gated. The selector check is critical — V3's SwapRouter has a
 `multicall(bytes[])` that lets calldata chain arbitrary internal calls. **Do
 NOT seed `multicall` for any router** unless you've audited the implications.
+
+### Sandwich-floor enforcement on FTSO-anchored swaps
+
+Any time a contract swaps an asset whose price has an FTSO feed (FAsset →
+WFLR, WFLR → vault collateral, etc.), the slippage gate should be
+**FTSO-anchored**, not pool-quote-anchored. The pattern:
+
+```solidity
+// 1. Read the FTSO-implied output for amountIn — the "fair" value.
+uint256 ftsoImpliedOut = (amountIn * rateScaled1e36) / 1e36;
+
+// 2. minOut floors at (1 - swapDownsideMaxBps). swapDownsideMaxBps is
+//    bounded (typically 50 = 0.5%); never make this caller-controlled.
+uint256 minOut = (ftsoImpliedOut * (BPS_DENOM - swapDownsideMaxBps)) / BPS_DENOM;
+
+// 3. Pass minOut to the router AND verify post-swap balance delta.
+//    The router enforces minOut against its quote; the balance delta
+//    catches FoT tokens that under-deliver while reporting full output.
+uint256 wflrBefore = IERC20(WFLR).balanceOf(address(this));
+router.exactInput(ExactInputParams({path: path, recipient: address(this), ...}));
+uint256 amountOut = IERC20(WFLR).balanceOf(address(this)) - wflrBefore;
+if (amountOut < minOut) revert SwapBelowMinOut(amountOut, minOut);
+```
+
+**What this defends against**:
+- **Sandwich attacks**: a bot pre-positions liquidity to make the router
+  pay below FTSO-anchored expectation. Loss is bounded by `swapDownsideMaxBps`
+  — typically 0.5% of swap volume. Below that, the swap reverts entirely
+  and harvest is retried later.
+- **Fee-on-transfer FAsset upgrade**: if a future FAsset proxy upgrade adopts
+  FoT, the router-reported `amountOut` would lie. Balance-delta verification
+  catches the actual delivered amount.
+
+**Bounded extraction is acceptable**; complete DoS is not. 0.5% is the
+break-even point: attackers profit on average less than they spend on LP
+fees + gas. Tightening to 0.1% in low-liquidity regimes is fine; loosening
+beyond 1% is a finding.
+
+### MEV exposure on owner-only setters
+
+Owner-only parameter setters (`setSwapPath`, `setProtocolFeeBps`, etc.) are
+trust-gated by access control, but if the owning multisig is **publicly
+executable** (Safe/Gnosis with visible queued transactions, on-chain
+governance with mempool-visible voting), an attacker can pre-position
+liquidity to extract slippage on the NEXT operation that uses the changed
+parameter.
+
+Concrete attack: owner queues `setSwapPath(FXRP, newPath)` switching from a
+deep pool to a thinner one. Attacker sees the queued tx, drains the new
+pool just before execution, and the next harvest pays the slippage floor.
+
+**Bound**: the same `swapDownsideMaxBps` that protects ordinary swaps.
+Attacker cannot force routing through a pool they fully control because
+the owner sends the literal path; front-running can't change tx contents.
+
+**Mitigations**:
+- Schedule parameter changes during low-balance harvest windows.
+- Add a no-harvest-flag for N blocks after the path update.
+- For high-stakes parameters, require a timelock (24h+) so the FE can
+  display "next harvest will route through new path" warnings.
+
+**Document, don't hide**. List the exposed setters in CLAUDE.md alongside
+the bounded extraction estimate. Auditors will flag this otherwise.
 
 ---
 

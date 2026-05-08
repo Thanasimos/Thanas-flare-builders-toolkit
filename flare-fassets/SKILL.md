@@ -330,6 +330,126 @@ This means XRPL users can mint/redeem FXRP, stake into Firelight, or interact wi
 
   Dual-network wallets give the smoothest mint flow.
 
+## Canonical struct shapes — verified live 2026-05-08
+
+The two AssetManager structs that integrating contracts decode are easy to
+get wrong by hand because the upstream Flare definitions have evolved over
+time and aren't always in sync with third-party docs. Mock-only test suites
+will not catch a layout mismatch — the mock re-encodes whatever shape you
+declare. The only tests that cover this class of bug are (a) live-fork
+calls against the real `AssetManagerFXRP` (`0x2a3Fe068cD92178554cabcf7c95ADf49B4B0B6A8`),
+and (b) `fallback()`-based mocks that return canonical bytes.
+
+### `IAssetManager.getAgentInfo(address)` returns `AgentInfo.Info` — 39 fields
+
+Field order (verified by calling
+`cast call AssetManagerFXRP 'getAgentInfo(address)((uint8,address,address,address,address,string,bool,uint256,uint256,address,uint256,uint256,uint256,uint256,uint256,uint256,address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,int256,uint256,int256,uint256,uint256,uint256,uint256))' <AGENT> --rpc-url flare`):
+
+```solidity
+struct Info {
+    Status status;                          // 0=NORMAL, 1=LIQUIDATION, 2=FULL_LIQ, 3=DESTROYING, 4=DESTROYED
+    address ownerManagementAddress;
+    address ownerWorkAddress;
+    address collateralPool;
+    address collateralPoolToken;
+    string  underlyingAddressString;        // XRPL "rs6q5K…", BTC "bc1q…", etc.
+    bool    publiclyAvailable;
+    uint256 feeBIPS;
+    uint256 poolFeeShareBIPS;
+    IERC20  vaultCollateralToken;           // e.g. USDT0
+    uint256 mintingVaultCollateralRatioBIPS;
+    uint256 mintingPoolCollateralRatioBIPS;
+    uint256 freeCollateralLots;
+    uint256 totalVaultCollateralWei;
+    uint256 freeVaultCollateralWei;
+    uint256 vaultCollateralRatioBIPS;
+    IERC20  poolWNatToken;                  // WFLR on Flare
+    uint256 totalPoolCollateralNATWei;
+    uint256 freePoolCollateralNATWei;
+    uint256 poolCollateralRatioBIPS;
+    uint256 totalAgentPoolTokensWei;
+    uint256 announcedVaultCollateralWithdrawalWei;
+    uint256 announcedPoolTokensWithdrawalWei;
+    uint256 freeAgentPoolTokensWei;
+    uint256 mintedUBA;
+    uint256 reservedUBA;
+    uint256 redeemingUBA;
+    uint256 poolRedeemingUBA;
+    uint256 dustUBA;
+    uint256 liquidationStartTimestamp;
+    uint256 maxLiquidationAmountUBA;
+    uint256 liquidationPaymentFactorVaultBIPS;
+    uint256 liquidationPaymentFactorPoolBIPS;
+    int256  underlyingBalanceUBA;           // signed
+    uint256 requiredUnderlyingBalanceUBA;
+    int256  freeUnderlyingBalanceUBA;       // signed
+    uint256 announcedUnderlyingWithdrawalId;
+    uint256 buyFAssetByAgentFactorBIPS;
+    uint256 poolExitCollateralRatioBIPS;
+    uint256 redemptionPoolFeeShareBIPS;
+}
+```
+
+Subset structs that only read the fields you need are fine — Solidity's ABI
+decoder respects field count and types — but if you skip a field, every
+field after it must be skipped too (positional, not name-keyed).
+
+### `IAssetManager.getCollateralTypes()` returns `CollateralType.Data[]` — 9 fields
+
+Verified shape on Flare mainnet (returns 2 entries: POOL=WFLR, VAULT=USDT0):
+
+```solidity
+struct Data {
+    uint8   collateralClass;        // 1=POOL, 2=VAULT (0 reserved)
+    IERC20  token;
+    uint256 decimals;
+    uint256 validUntil;             // 0 means active
+    bool    directPricePair;
+    string  assetFtsoSymbol;        // e.g. "XRP"
+    string  tokenFtsoSymbol;        // e.g. "FLR" or "USDT"
+    uint256 minCollateralRatioBIPS;
+    uint256 safetyMinCollateralRatioBIPS;
+}
+```
+
+A common audit failure: declaring `validUntil` as `bool` and `directPricePair`
+as `uint256` (the field-type swap). Decode silently misreads thresholds and
+agents become non-eligible by accident. **No `ccbMinCollateralRatioBIPS`
+field exists today** — it's gone from upstream; remove if you've copied it.
+
+### AssetManager registry naming — no underscore
+
+`FlareContractRegistry.getContractAddressByHash(bytes32)` resolves names hashed
+via `keccak256(abi.encode(name))`. The actual registered names are
+**without underscore**:
+
+```text
+AssetManagerFXRP   ✓        AssetManager_FXRP   ✗  (silently resolves to 0x0)
+AssetManagerFBTC   ✓        AssetManager_FBTC   ✗
+AssetManagerFDOGE  ✓
+```
+
+The wrong encoding is the more common bug — `keccak256(bytes(name))` returns
+a different hash and the registry returns `address(0)`. Verified by enumerating
+`getAllContracts()` on the live registry 2026-05-07.
+
+### `ICollateralPool.exit(uint256 tokenShare)` returns native NAT — wrap immediately
+
+Pool-token redemption returns `uint256 natShare` of native FLR (not WFLR).
+Receiver MUST have `receive() external payable {}`, then wrap:
+
+```solidity
+try pool.exit(tokenShare) returns (uint256 natReceived) {
+    if (natReceived > 0) WFLR.deposit{value: natReceived}();
+} catch {
+    // Don't brick the entire flow if one pool's exit gating triggers.
+}
+```
+
+`pool.enter()` is the reverse: send native via `{value:X}`, receive
+`(collateralPoolTokens, timelockExpiresAt)`. If `enter()` reverts, native
+is returned by Solidity call semantics — re-wrap to keep accounting tight.
+
 ## Security and usage considerations
 
 **This skill is reference documentation only.** It does not execute transactions or hold keys. Use it to implement or debug FAssets flows; all financial execution (minting, redemption, fee payments, contract calls) is the responsibility of the developer and end user.

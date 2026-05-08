@@ -129,6 +129,113 @@ Write a **Handler contract** that wraps the target contract to:
 
 10. **Library link verification** — if the contract uses external library functions, write a test that asserts the library is deployed at the expected address with non-empty bytecode. For deploy scripts, run a fork dry-run AND **drill all the way through** — don't stop at the first error, because each error can mask the next downstream bug.
 
+### 2h. Reentrant external-callback tests (mandatory if the contract receives native FLR or makes recipient-callable external calls)
+
+If the contract has `receive() external payable` or makes any external call where the callee can re-enter the contract during execution, write at least one test that proves the `nonReentrant` guard catches the attempt. Pattern:
+
+```solidity
+// Subclass the standard mock to attempt re-entry during the inner call.
+contract ReentrantPool is MockCollateralPool {
+    Target public target;
+    bytes public payload;
+
+    function arm(Target t, bytes calldata p) external { target = t; payload = p; }
+
+    function exit(uint256 share) external override returns (uint256 nat) {
+        // ... do normal work, transfer native to caller (which is `target`) ...
+        (bool ok,) = msg.sender.call{value: nat}(""); require(ok);
+
+        // Now attempt the re-entry. nonReentrant on `target.someFn` MUST
+        // cause the inner call to revert. The require(!reok) below converts
+        // that revert into a clean "test passed" signal without bubbling.
+        if (address(target) != address(0) && payload.length > 0) {
+            (bool reok,) = address(target).call(payload);
+            require(!reok, "reentry should have reverted");
+        }
+    }
+}
+
+// In the test: arm the malicious pool with `deposit(amount, recipient)`
+// payload, then drive the outer redeem path — the outer must succeed
+// because nonReentrant guards the inner attempt.
+```
+
+For mocks to be subclassable, mark the relevant overridable methods (`exit`, `enter`, `receive`) as `virtual` in the base mock — Solidity defaults to non-virtual.
+
+### 2i. Gas-stress at registry caps (mandatory if the contract has bounded loops over user-registered data)
+
+If the contract has any registry that loops over registered entries (`agents[]`, `dexes[]`, `tokens[]`), write a standalone test that fills the registry to `MAX_*` cap and measures gas for every public path:
+
+```solidity
+contract GasStressTest is Test {  // standalone, NOT inheriting unit-test base
+    uint256 internal constant SAFE_BUDGET = 8_000_000;  // half block gas limit
+
+    function setUp() public {
+        // ... deploy + register MAX_* entries here ...
+    }
+
+    function test_GasStress_TotalAssets_UnderBudget() public {
+        uint256 g0 = gasleft();
+        target.totalAssets();
+        uint256 used = g0 - gasleft();
+        assertLt(used, SAFE_BUDGET, "totalAssets exceeds 8M budget");
+        emit log_named_uint("totalAssets gas", used);
+    }
+    // ... one test per public path: maxRedeem, allocate, deposit, etc.
+}
+```
+
+**Use 8M as the safety budget**, not the full 15M block limit. Above 8M users mis-estimate gas, txs land in reorg-vulnerable cycles, and a single tx can span block-spanning sandwiches.
+
+**Standalone, not inheriting** — same reason as invariant tests. Filling the registry to the cap will brick any inherited unit test that calls `_registerAgent` or similar.
+
+### 2j. CR-boundary / threshold off-by-one tests
+
+Any contract with a comparison threshold (`if (x < threshold) revert`) needs explicit at-threshold + one-below-threshold tests. The common bug is `<=` instead of `<`. Pattern:
+
+```solidity
+function test_Boundary_ExactThreshold_Allows() public {
+    Info memory info = _eligibleInfo();
+    info.someRatio = THRESHOLD;  // exactly at floor
+    vm.prank(owner);
+    target.register(...);
+    assertTrue(target.isEligible(...), "at-threshold should be eligible");
+}
+
+function test_Boundary_OneBelow_Rejects() public {
+    Info memory info = _eligibleInfo();
+    info.someRatio = THRESHOLD - 1;  // one BIP below
+    vm.prank(owner);
+    target.register(...);
+    assertFalse(target.isEligible(...), "below-threshold should NOT be eligible");
+}
+```
+
+Mirror this for both pool-side and vault-side thresholds, and for any other paired floors (rate × multiplier / BPS_DENOM patterns).
+
+### 2k. Pause-mid-redeem behavior
+
+For ERC-4626 vaults with a `whenNotPaused` modifier on state-changing entries, verify pause:
+1. **Blocks** redeem/withdraw/deposit/mint with the standard pausable error
+2. **Does NOT block** view paths (`totalAssets`, `maxRedeem`, `previewRedeem`, `balanceOf`)
+
+Users need view liveness during a pause window to see they're still solvent. If your pause modifier sneaks onto a view by accident, this test catches it.
+
+### 2l. ERC-4626 spec compliance (directional rounding)
+
+For ERC-4626 vaults, the four directional guarantees must be tested explicitly. They protect users from being silently shorted:
+
+| Property | Direction | Test |
+|---|---|---|
+| `previewDeposit(a)` ≤ `deposit(a)` | actual ≥ preview (user receives ≥ promised shares) | `assertGe(actualShares, previewedShares)` |
+| `previewMint(s)`    ≥ `mint(s)`    | actual ≤ preview (user pays ≤ promised assets) | `assertLe(actualAssets, previewedAssets)` |
+| `previewWithdraw(a)` ≥ `withdraw(a)` | actual ≤ preview (user burns ≤ promised shares) | `assertLe(actualSharesBurned, previewedSharesBurned)` |
+| `previewRedeem(s)`   ≤ `redeem(s)`   | actual ≥ preview (user receives ≥ promised assets) | `assertGe(actualAssets, previewedAssets)` |
+
+Plus zero-input edges (`previewX(0) == 0`), `convertToAssets(convertToShares(X)) ≤ X` (round-trip never inflates), and `maxRedeem`/`maxWithdraw` round-trip-achievable (no off-by-one — calling `redeem(maxRedeem(addr), addr, addr)` must not revert).
+
+**Inflation defense**: verify `_decimalsOffset()` is overridden to ≥6 (typical) or ≥12 (tight). With offset=12, attack capital required to zero a 10^15 (millicoin) victim deposit is ~2 × 10^27 wei — economically impossible. Without an offset, an attacker mints 1 wei share + donates → next victim's shares round to zero. A16z's erc4626-tests reference suite is the canonical port-target.
+
 ## Step 3 — Write the tests
 
 ### File naming & structure
@@ -329,6 +436,17 @@ contract VaultInvariantTest is Test {
     function setUp() public {
         vault = new Vault();
         handler = new VaultHandler(vault);
+
+        // CRITICAL: explicitly target handler selectors. Default
+        // targetContract behavior also exposes vm cheatcodes inherited
+        // from Test, which the fuzzer wastes calls on. The handler
+        // itself can inherit Test (for vm cheatcodes inside actions);
+        // the invariant test contract should explicitly whitelist
+        // selectors:
+        bytes4[] memory selectors = new bytes4[](2);
+        selectors[0] = VaultHandler.deposit.selector;
+        selectors[1] = VaultHandler.withdraw.selector;
+        targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
     }
 
@@ -344,6 +462,21 @@ contract VaultInvariantTest is Test {
     }
 }
 ```
+
+**Common gotchas**:
+- **Smoke check that fails on initial state**: don't write
+  `assertGt(handler.ghost_callCount(), 0)` — Foundry checks invariants against
+  the initial state BEFORE the first handler call, so this fires immediately.
+  The other passing invariants are sufficient proof the fuzzer ran.
+- **Standalone over inheritance**: if your unit test base does setUp work
+  that registers fixtures the handler will then duplicate, write the
+  invariant test as a STANDALONE contract (not inheriting the unit-test
+  base). Otherwise inherited test methods re-run with a polluted setUp
+  and fail on duplicate-registration errors.
+- **`fail_on_revert = false`**: the handler should `try/catch` user
+  actions because the contract's own access-control or pause gates
+  legitimately revert. Without `fail_on_revert = false` (set in
+  `foundry.toml`), every gated revert tanks the run.
 
 **Invariant config in `foundry.toml`:**
 ```toml

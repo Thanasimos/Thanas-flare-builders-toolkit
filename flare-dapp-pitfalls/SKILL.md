@@ -229,6 +229,13 @@ require(ok, "WNAT deposit failed");    // alice now has WNAT, checkpoint correct
 `deal(token, addr, amount)` (the `forge-std` helper, lowercase) works fine for
 **non-WNAT** ERC-20s like USDT0, USDC, FXRP — just not for WNAT itself.
 
+**WNAT recipient-side reverts CANNOT block transfers**. The hook only updates
+internal state on the WNAT contract; it does not call into the recipient. A
+contract whose `receive()` and `fallback()` both `revert("blocked")` still
+receives WNAT successfully. Empirically confirmed against live Flare WFLR
+2026-05-08 — useful to know when an audit tries to flag a `safeTransfer(WFLR, ...)`
+to an unknown recipient as a DoS vector.
+
 ### FTSO reward-claim gas blows past naive estimates
 
 A long-held NFT position with many accrued FTSO epochs can require **7M+ gas** just
