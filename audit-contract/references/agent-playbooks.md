@@ -198,6 +198,205 @@ Detailed playbooks for each of the 11 specialist agents. The orchestrator spawns
 
 **Instruction**: "The goal is NOT to steal funds — it's to make the contract unusable or lock funds forever. For each attack, determine: is it permanent or temporary? What's the attacker's cost vs. the victim's damage? Can the contract admin recover from it?"
 
+### Agent 12: External Boundary Verification
+
+**Role**: Find bugs at the boundary between the contract and live external contracts — the class of bugs that mock-based testing **cannot catch by construction** because mocks mirror our model of the external interface. If our model is wrong, our mock is wrong the same way, our tests pass, and mainnet reverts (or worse, silently corrupts state).
+
+**Why this agent exists**: Real-world examples include:
+- A `CollateralType.Data` struct with fields in the wrong order — decode succeeded against mocks but produced garbage when called against the live AssetManager (FAsset Collateral LST, 2026-05-07).
+- A FlareContractRegistry name hash computed via `keccak256(bytes(name))` instead of `keccak256(abi.encode(name))` — mocks passed, live registry returned `0x0` for every lookup.
+- A pinned function selector for OpenOcean's `swap()` computed from a guess at the signature rather than the deployed bytecode — sweep transactions reverted with `SelectorNotAllowed` until corrected.
+
+**Playbook**:
+
+#### B-1. Boundary inventory
+
+Enumerate every external interaction the contract makes. For each call site, document:
+
+- **Target**: pinned constant address, runtime-resolved (via registry / factory), or user-supplied?
+- **Selector**: hardcoded constant, or computed from a Solidity-typed call?
+- **Argument shape**: struct fields in what order? dynamic types in what positions?
+- **Return shape**: struct fields and their types?
+- **Caller's gating logic**: does our flow branch based on a returned value? (eligibility checks, amount comparisons, address matches)
+
+Output as a table. Every row is a potential boundary bug location.
+
+#### B-2. Canonical-fallback decode tests (struct returns)
+
+For every external function that returns a struct, write a `fallback()` mock that returns **canonical-shape bytes**, then verify the contract's actual decoder handles them. Mocks that re-encode our (potentially wrong) struct mask the bug.
+
+```solidity
+contract CanonicalShapeMock {
+    fallback() external payable {
+        if (msg.sig != bytes4(keccak256("getX()"))) revert("bad selector");
+        // Build bytes that match the UPSTREAM canonical layout, by either:
+        //   (a) literal hex copied from a live RPC `cast call`, OR
+        //   (b) re-encoding using a struct shape DEFINED LOCALLY in the test
+        //       file matching the upstream canonical (NOT our contract's struct).
+        CanonicalUpstreamShape[] memory data = ...;
+        bytes memory ret = abi.encode(data);
+        assembly ("memory-safe") { return(add(ret, 0x20), mload(ret)) }
+    }
+}
+```
+
+If our contract's decoder reverts, or returns garbage that differs from what a canonical-shape decoder would produce, that's a finding.
+
+#### B-3. Live-fork ABI verification
+
+When the target chain is known, write a fork test that calls the **real upstream contract** and decodes through our struct. Sanity-check the result:
+
+```solidity
+function test_LiveFork_GetCollateralTypesDecodesCleanly() public {
+    vm.createSelectFork(vm.envString("FLARE_RPC"));
+    CollateralType.Data[] memory types = IAssetManager(LIVE_ADDR).getCollateralTypes();
+    assertGt(types.length, 0);
+    // Address fields should be reasonable addresses, not 1e47-shaped numbers
+    // (which would indicate an address got cast as uint256 due to wrong layout).
+    assertLt(uint160(address(types[0].token)), type(uint160).max);
+    // CR values should be in BIPS range (typically ~1e3 to ~1e5).
+    assertGt(types[0].minCollateralRatioBIPS, 1000);
+    assertLt(types[0].minCollateralRatioBIPS, 1_000_000);
+}
+```
+
+The "is this an address cast as uint256?" sanity check catches the shape-mismatch case where decode "succeeds" but values are nonsense.
+
+#### B-4. Function selector verification
+
+For every selector pinned at compile time (4-byte values, function-pointer assignments, allowlist seeds), verify against the live chain:
+
+```bash
+# Method 1: build artifact (for our own contracts)
+cat out/Contract.sol/Contract.json | jq '.methodIdentifiers'
+
+# Method 2: live deployed bytecode dispatch table (for third-party)
+cast code <addr> --rpc-url <chain> | grep -oE '63[0-9a-f]{8}1461'
+
+# Method 3: actual API response from the off-chain integrator
+curl -s '<aggregator API>' | jq -r '.data.data[2:10]'
+```
+
+NEVER accept a selector that was computed by guessing the Solidity signature and running `cast sig` on it. The signature must come from a verified source: the build artifact, the deployed bytecode, or a live API response.
+
+#### B-5. Hash encoding verification
+
+For hashes used to look up values in a registry (or as map keys), verify the registry's actual encoding:
+
+```bash
+# Compare name lookup vs hash lookup with our suspected encoding
+cast call <registry> 'getContractAddressByName(string)(address)' "FtsoV2" --rpc-url <chain>
+cast call <registry> 'getContractAddressByHash(bytes32)(address)' "$(cast keccak 'FtsoV2')" --rpc-url <chain>
+
+# If they disagree, the registry uses a different encoding — try:
+cast call <registry> 'getContractAddressByHash(bytes32)(address)' "$(cast keccak "$(cast abi-encode 'f(string)' 'FtsoV2')")" --rpc-url <chain>
+```
+
+The `cast keccak` of raw text and the `cast keccak` of `abi.encode(string)` produce different hashes. Many Flare-family registries use the abi.encode form. Verify, never assume.
+
+#### B-6. View liveness under degraded inputs
+
+For every public view that reads external state (oracles, registries, balances), parameterize tests covering:
+
+- Stale oracle (timestamp far past `maxAge`)
+- Zero oracle return value
+- Out-of-bounds returned values (decimals > 24, very large/very small numbers)
+- External reverts with arbitrary error
+- External returns no code at all (the address was never deployed)
+
+The view should either return SOMETHING (degraded gracefully) or revert with a clean, identifiable error. Then verify the **downstream consumers** stay live too:
+
+```solidity
+function test_ViewLiveness_OnStaleOracle() public {
+    _seedRedeemableBalance(alice);
+    _staleAllOracleFeeds();
+    lst.totalAssets();              // must not revert
+    lst.maxRedeem(alice);           // must not revert
+    lst.maxWithdraw(alice);         // must not revert
+    lst.previewRedeem(lst.balanceOf(alice));  // must not revert
+    // The user must actually be able to exit.
+    vm.prank(alice);
+    lst.redeem(lst.balanceOf(alice), alice, alice);
+}
+```
+
+#### B-7. Asset reconciliation invariant
+
+For value-holding contracts, write an invariant test asserting:
+
+```solidity
+function invariant_AccountingCountsAllHeldValue() public {
+    uint256 reconciled = address(target).balance;       // native
+    reconciled += primaryToken.balanceOf(address(target)); // primary asset
+    for (each held secondary token T) reconciled += T.balanceOf(target) * priceOf(T);
+    for (each external position P) reconciled += valueOf(P);
+    assertGe(reconciled, target.totalAssets());
+}
+```
+
+If `totalAssets()` undercounts, there's value invisible to accounting (L-01 case — stray native). If it overcounts, accounting is corrupt.
+
+#### B-8. Native vs wrapped asset traps
+
+If the contract has BOTH `receive() {}` AND a wrapped-native token (WETH/WFLR/WMATIC):
+
+- Can stray native arrive (direct transfer, `selfdestruct` push, miner payment) and become invisible to `totalAssets()`?
+- Is there a permissionless recovery function (`wrapNative()` or similar)?
+- Does the recovery function mint shares to the caller (vulnerability) or just return value to existing holders (correct)?
+- Is `receive()` `nonReentrant`? It probably shouldn't be (would block legitimate WFLR.withdraw flows), but the wrap-recovery function MUST be.
+
+#### B-9. External-revert DoS scoping
+
+For every `try/catch`-wrapped external call, the catch path must leave the contract in a sensible state. For every NON-wrapped external call:
+
+- Can an attacker cause the external to revert? (malicious token, stale oracle, paused upstream)
+- Is the external in a multi-party loop? (registerAgent loop, fee-payout loop, etc.) — one revert from a malicious party can DoS the whole loop.
+- Does the contract have a "skip on failure" path?
+
+#### B-10. Library link address verification
+
+For contracts with `external` library functions:
+
+- Was the library auto-deployed by `forge script` / `forge create`?
+- Is the library's deployed address present at the expected location in the calling contract's bytecode?
+- During dry-run simulation, can `forge script` fail to apply the library's deployed bytecode before subsequent calls execute? (forge bug; split into separate scripts as a workaround).
+
+```bash
+# Verify the library exists at the linked address
+cast code <library_addr> --rpc-url <chain> | head -c 100
+# If empty, the link is broken
+```
+
+#### B-11. External upgrade behavior drift
+
+For external contracts that are proxies (most Flare/OZ contracts are):
+
+- What's the implementation address today?
+- What was it at the time we wrote our caller logic?
+- If it changed, did the new implementation preserve the ABI we depend on?
+- Does our caller break gracefully if the implementation upgrades to something incompatible?
+
+#### B-12. Magic-constant verification
+
+Any string, address, selector, hash, or numeric constant pinned in source code that refers to the external world MUST be verified against a live source. NEVER trust:
+
+- "I copied this from the docs" — docs lag deployments
+- "I computed this from the signature" — signature might not match deployment
+- "I asked an LLM" — LLM might hallucinate
+
+ALWAYS verify against:
+
+- A live RPC call (`cast call`, `cast code`)
+- A build artifact (`out/X.json` `methodIdentifiers`)
+- An on-chain block-explorer-verified contract source
+- An API response from the actual integrator
+
+#### B-13. Empirical ground-truth check before merge
+
+For any new code that touches an external boundary (new external call, new pinned constant, new struct decode), write a one-shot verification command in the PR description showing the live response. This creates a paper trail and forces conscious verification.
+
+**Instruction**: "For every external call this contract makes, the assumption baked into our code MUST match what the external contract actually does on the deployed chain. Mock-based tests are round-trip consistent and CANNOT detect a shared misunderstanding between the contract and its mocks. Whenever possible, use live RPC calls (cast, forge fork tests) to verify. The recurring failure mode: 'our model is wrong, our mock matches our model, our test passes, mainnet reverts (or silently corrupts state).' Don't stop at the first error in a fork dry-run — drill all the way through, because each layer can hide the next bug."
+
 ### Agent 11: Privacy & Information Leakage
 
 **Role**: Find sensitive information that's exposed on-chain or through transaction patterns.

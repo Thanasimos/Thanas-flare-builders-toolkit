@@ -92,6 +92,43 @@ Write a **Handler contract** that wraps the target contract to:
 - Pin to a specific block for reproducibility.
 - Use `deal()` to set up token balances.
 
+### 2g. Boundary tests (mandatory if the contract makes ANY external call)
+
+**Why this category exists**: Mocks are round-trip consistent with the contract's model of an external interface. If the contract's struct shape, selector, name-hash encoding, or return-value assumption is wrong, the mock is wrong the same way and tests pass while mainnet reverts (or worse, silently corrupts state). Mock-only suites cannot catch this class of bug by construction. Real-world examples: a CollateralType.Data field-order mismatch produced silent-eligibility failures on a Flare LST (2026-05-07); a FlareContractRegistry name hash computed via `keccak256(bytes(name))` instead of `keccak256(abi.encode(name))` returned `0x0` for every lookup against the live registry.
+
+**Mandatory tests for every external interaction**:
+
+1. **Boundary inventory comment** — at the top of the boundary test file, list every external call the contract makes (target, selector, struct shapes). One sentence per call. This is documentation, not enforcement, but it forces the test author to look at every boundary.
+
+2. **Canonical-fallback decode** for each external function returning a struct. Mock the upstream with a `fallback()` that returns canonical-shape bytes; verify the contract's actual decoder handles them. Skipping this means a struct-shape mismatch can slip through any number of mock-based tests.
+
+3. **Live-fork ABI verification** when the deploy chain is known. Call the real upstream with `vm.createSelectFork(...)` and decode through the contract's own struct. Sanity-check the result: any address field reading as `>1e40` indicates the layout is wrong (address bits cast as uint256). CR/ratio/decimal fields outside their plausible range have the same smell.
+
+4. **Selector verification** — for every selector pinned at compile time (4-byte constants, allowlist seeds, function-pointer assignments), at least one test must verify it against the build artifact (`out/X.sol/X.json` `methodIdentifiers`) or live bytecode (`cast code <addr>` dispatch table). Computing a selector with `cast sig` of a guessed Solidity signature is NOT verification.
+
+5. **Hash encoding verification** — for every name-keyed registry lookup, one test must call the registry's `getByName(string)` AND `getByHash(bytes32)` paths with both `keccak256(bytes(name))` and `keccak256(abi.encode(name))` to confirm which encoding the registry expects.
+
+6. **View liveness under degraded inputs** — for each public view that reads external state (oracles, registries, balances), test:
+   - Stale oracle (timestamp > maxAge)
+   - Zero oracle
+   - Out-of-bounds returned values (decimals > 24, etc.)
+   - External reverts
+   - External has no code
+   
+   The view must either return a degraded value or revert with a clean error. Then verify downstream consumers (ERC4626 max*, frontends, multicall paths) stay live too — the test must call `maxRedeem`, `previewWithdraw`, etc. and assert they don't propagate the revert.
+
+7. **Asset reconciliation invariant** — for value-holding contracts:
+   ```
+   sum(native + held tokens × oracle prices + external positions) >= totalAssets()
+   ```
+   If the LHS exceeds the RHS, value is invisible to accounting (the L-01 stray-native case). If the LHS is less, accounting is corrupt. Run as a stateful invariant with multiple actors performing all entry-point operations.
+
+8. **Native vs wrapped traps** — if the contract has both `receive() {}` and a wrapped-native asset, test that stray native arriving via direct transfer (or `selfdestruct` push) is recoverable into accounting. If no recovery path exists, that's a finding — write the test that demonstrates the trap.
+
+9. **External-revert non-DoS** — for every multi-party loop calling an external (registerAgent loop, payout loop), test that one party's external reverting (malicious token, blacklisted address) doesn't brick the others. Either the loop has a `try/catch` skip or the test fails and the contract needs one.
+
+10. **Library link verification** — if the contract uses external library functions, write a test that asserts the library is deployed at the expected address with non-empty bytecode. For deploy scripts, run a fork dry-run AND **drill all the way through** — don't stop at the first error, because each error can mask the next downstream bug.
+
 ## Step 3 — Write the tests
 
 ### File naming & structure
@@ -102,6 +139,11 @@ test/
 ├── ContractName.fuzz.t.sol     # Fuzz tests (if complex enough to separate)
 ├── ContractName.invariant.t.sol # Invariant tests with handler
 ├── ContractName.fork.t.sol     # Fork tests (if needed)
+├── ContractName.boundary.t.sol # MANDATORY if any external call exists —
+│                               # canonical-fallback decode, selector verify,
+│                               # hash encoding verify, view liveness under
+│                               # degraded inputs, asset reconciliation,
+│                               # native-vs-wrapped traps, external-revert DoS
 ├── handlers/
 │   └── ContractNameHandler.sol # Invariant test handler
 └── helpers/
@@ -335,6 +377,197 @@ contract ForkTest is Test {
 }
 ```
 
+### Boundary test patterns
+
+These are the concrete templates for the mandatory tests in Section 2g. Copy and adapt one per external interaction.
+
+**Canonical-fallback decode** (for every external `getX() returns (Struct)`):
+
+```solidity
+// Define the upstream's canonical struct LOCALLY in the test file. Do NOT
+// reuse the contract's own struct here — that defeats the purpose. The
+// canonical layout should come from the upstream's verified source or a
+// live `cast call` decoded with the canonical types.
+struct CanonicalUpstreamShape {
+    uint8 collateralClass;
+    address token;
+    uint256 decimals;
+    uint256 validUntil;
+    bool directPricePair;
+    string assetFtsoSymbol;
+    string tokenFtsoSymbol;
+    uint256 minCollateralRatioBIPS;
+    uint256 safetyMinCollateralRatioBIPS;
+}
+
+contract CanonicalShapeMock {
+    fallback() external payable {
+        if (msg.sig != bytes4(keccak256("getCollateralTypes()"))) revert("bad selector");
+        CanonicalUpstreamShape[] memory data = new CanonicalUpstreamShape[](1);
+        data[0] = CanonicalUpstreamShape({
+            collateralClass: 1,
+            token: address(0xWFLR),
+            decimals: 18,
+            validUntil: 0,
+            directPricePair: false,
+            assetFtsoSymbol: "XRP",
+            tokenFtsoSymbol: "FLR",
+            minCollateralRatioBIPS: 15_000,
+            safetyMinCollateralRatioBIPS: 16_000
+        });
+        bytes memory ret = abi.encode(data);
+        assembly ("memory-safe") { return(add(ret, 0x20), mload(ret)) }
+    }
+}
+
+function test_Boundary_CanonicalAbiDecodesCleanly() public {
+    // Wire the mock as the external the contract resolves to,
+    // then call any contract function that decodes through getCollateralTypes.
+    target.someFunctionThatDecodesUpstream();
+    // Assert the decoded values are sensible (the contract should produce
+    // results consistent with the canonical inputs).
+}
+```
+
+**Live-fork ABI sanity check**:
+
+```solidity
+function test_Fork_LiveUpstreamDecodesCleanly() public {
+    vm.createSelectFork(vm.envString("FLARE_RPC"));
+    UpstreamStruct[] memory items = IUpstream(LIVE_ADDR).getX();
+
+    assertGt(items.length, 0, "live upstream should return non-empty");
+
+    // Smell tests for shape mismatch:
+    // - Address fields shouldn't be huge integers (signals address bits cast as uint256).
+    assertLt(uint256(uint160(items[0].token)), type(uint160).max);
+    // - Numeric fields should be in their plausible ranges (BIPS ~10^3 to ~10^5,
+    //   decimals 0-30, etc).
+    assertGt(items[0].minCollateralRatioBIPS, 1_000);
+    assertLt(items[0].minCollateralRatioBIPS, 1_000_000);
+    // - Boolean fields decode to 0 or 1, not nonsense.
+    // - String fields should be short and printable.
+}
+```
+
+**Selector verification** (for pinned 4-byte constants):
+
+```solidity
+// Pull the canonical selector from the build artifact at test setup time
+// rather than recomputing from a Solidity signature.
+function test_Boundary_PinnedSelectorMatchesBuild() public {
+    // Read methodIdentifiers from out/Upstream.sol/Upstream.json and assert
+    // the contract's pinned constant matches. If the upstream is third-party,
+    // assert against the live bytecode dispatch table instead:
+    bytes memory code = address(LIVE_UPSTREAM).code;
+    // Search for the pattern PUSH4 <selector> EQ in the dispatcher.
+    bytes4 expected = IUpstream.someFunction.selector;
+    assertTrue(_bytecodeContainsSelector(code, expected));
+}
+```
+
+**Hash encoding verification** (for name-keyed registries):
+
+```solidity
+function test_Fork_RegistryHashEncoding() public {
+    vm.createSelectFork(vm.envString("CHAIN_RPC"));
+
+    address byName = IRegistry(REGISTRY).getByName("MyContract");
+    address byPackedHash = IRegistry(REGISTRY).getByHash(keccak256(bytes("MyContract")));
+    address byEncodedHash = IRegistry(REGISTRY).getByHash(keccak256(abi.encode("MyContract")));
+
+    // Whichever path agrees with byName is the encoding the registry uses.
+    // Assert that the contract's pinned NAME_HASH matches whichever path works.
+    assertEq(target.NAME_HASH(), byPackedHash != address(0)
+        ? keccak256(bytes("MyContract"))
+        : keccak256(abi.encode("MyContract")));
+    assertEq(byName, target.resolveExternal());
+}
+```
+
+**View liveness under degraded inputs**:
+
+```solidity
+function test_Boundary_ViewsStayLiveWhenOracleStale() public {
+    _seedRedeemableBalance(alice);
+    _staleOracleFeed(); // sets feed.timestamp to 0 or > maxAge
+
+    // Every public view consumed by ERC4626 frontends must stay live.
+    target.totalAssets();
+    target.maxRedeem(alice);
+    target.maxWithdraw(alice);
+    target.previewRedeem(target.balanceOf(alice));
+    target.previewWithdraw(1 ether);
+
+    // Downstream user action must succeed if the LST has idle liquidity.
+    vm.prank(alice);
+    target.redeem(target.balanceOf(alice), alice, alice);
+}
+
+function test_Boundary_ViewsStayLiveWhenOracleZero() public { /* analogous */ }
+function test_Boundary_ViewsStayLiveWhenOracleOOB() public { /* analogous */ }
+function test_Boundary_ViewsStayLiveWhenExternalReverts() public { /* analogous */ }
+```
+
+**Asset reconciliation invariant** (in invariant test contract):
+
+```solidity
+function invariant_AccountingCountsAllHeldValue() public {
+    uint256 reconciled = address(target).balance;
+    reconciled += primaryAsset.balanceOf(address(target));
+    // Each registered FAsset's value at current FTSO rate
+    for (uint256 i; i < registeredFAssetCount(); ++i) {
+        address ft = target.registeredFAssets(i);
+        uint256 bal = IERC20(ft).balanceOf(address(target));
+        if (bal > 0) reconciled += _valueAtFtsoRate(ft, bal);
+    }
+    // Each external position
+    for (uint256 i; i < target.agentCount(); ++i) {
+        reconciled += _agentPositionValue(target.agents(i));
+    }
+    assertGe(reconciled, target.totalAssets(), "totalAssets undercount = hidden value");
+}
+```
+
+**Native vs wrapped traps**:
+
+```solidity
+function test_Boundary_StrayNativeRecoverable() public {
+    uint256 before = target.totalAssets();
+    vm.deal(alice, 1 ether);
+    vm.prank(alice);
+    (bool ok,) = address(target).call{value: 1 ether}("");
+    assertTrue(ok);
+
+    // Native is initially invisible to accounting.
+    assertEq(address(target).balance, 1 ether);
+    assertEq(target.totalAssets(), before);
+
+    // The contract MUST expose a permissionless recovery path. If this line
+    // fails to compile, the contract has the L-01 trap.
+    target.wrapNative();
+    assertEq(address(target).balance, 0);
+    assertEq(target.totalAssets(), before + 1 ether);
+}
+```
+
+**External-revert non-DoS**:
+
+```solidity
+function test_Boundary_OneAgentRevertingDoesNotBrickHarvest() public {
+    _registerAgent(healthyAgent, 1);
+    _registerAgent(maliciousAgent, 1);
+    _seedHarvestableFees();
+
+    // Make the malicious pool revert on every external call.
+    vm.mockCallRevert(address(maliciousPool), abi.encodeWithSelector(IPool.withdrawFees.selector), "I revert");
+
+    // Harvest must complete and credit the healthy agent's yield.
+    target.harvest(fAsset);
+    // Verify the healthy agent's share was harvested even though the malicious one wasn't.
+}
+```
+
 ### Verification helper pattern (from Moloch methodology)
 
 For functions with many state transitions, create internal helper functions:
@@ -370,6 +603,12 @@ function invariant_TotalSupplyMatchesBalances() public view {}
 
 // Fork tests: test_Fork_Description
 function test_Fork_SwapOnUniswap() public {}
+
+// Boundary tests: test_Boundary_AssertionAboutTheExternalEdge
+function test_Boundary_CanonicalAbiDecodesCleanly() public {}
+function test_Boundary_PinnedSelectorMatchesBuild() public {}
+function test_Boundary_StrayNativeRecoverable() public {}
+function test_Boundary_ViewsStayLiveWhenOracleStale() public {}
 ```
 
 ## Step 4 — Review coverage
@@ -386,6 +625,14 @@ Coverage summary:
 - Fuzz tests: 8 functions covered
 - Invariants: 4 properties checked
 - E2E flows: 3 lifecycle scenarios
+- Boundary coverage: N external interactions inventoried,
+    M canonical-fallback decode tests,
+    M selector verifications,
+    K hash-encoding verifications,
+    L view-liveness-under-degraded-input tests,
+    1 asset reconciliation invariant,
+    1 native-vs-wrapped trap test,
+    1 external-revert non-DoS test
 ```
 
 ## Rules
@@ -396,6 +643,8 @@ Coverage summary:
 - **DRY via setUp and helpers, not shared mutable state.** Never rely on test ordering.
 - **Every test must be independent.** `setUp()` runs fresh before each test.
 - **Test the sad path as thoroughly as the happy path.** Most exploits come from unexpected inputs and states.
+- **Trust live, not mocks.** Mocks are round-trip consistent with your model of an external contract; if your model is wrong, mocks are wrong the same way and tests pass while mainnet reverts. Every external interaction needs at least one boundary test that verifies against a canonical reference (live RPC, build artifact, block-explorer-verified source) — not against a mock you encoded yourself.
+- **Drill all the way through fork dry-runs.** Each error in a fork dry-run can hide the next downstream bug. Don't stop at the first error; fix and re-run until the script completes end-to-end.
 - **Use `bound()` over `vm.assume()`** — assume discards inputs and wastes fuzzer runs.
 - **When forking mainnet**, pin to a specific block number for reproducibility.
 - **Use `makeAddr()`** for all test addresses — never use raw `address(1)`, `address(2)`.

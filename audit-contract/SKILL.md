@@ -2,11 +2,13 @@
 name: audit-contract
 description: |
   Adversarial smart contract security audit. Auto-selects 5-7 specialist agents
-  based on contract features (from a roster of 11). Attacks from every relevant
+  based on contract features (from a roster of 12). Attacks from every relevant
   angle: SWC registry, signatures, reentrancy, state machine, ERC20 edge cases,
   economic exploits, game theory, L2-specific, flash loans, DoS/griefing, privacy,
-  backend integration. Runs Slither if available. Writes Foundry PoC tests for
-  critical findings. Produces a ranked finding list with severity and code fixes.
+  backend integration, external boundary verification (live ABI / selector / hash
+  checks against canonical references). Runs Slither if available. Writes Foundry
+  PoC tests for critical findings. Produces a ranked finding list with severity and
+  code fixes.
   Triggers on: "audit this contract", "security review",
   "attack this contract", "find vulnerabilities".
 allowed-tools:
@@ -51,7 +53,9 @@ If you catch yourself thinking any of these during the audit, stop and investiga
 | "nonReentrant is present, reentrancy is covered" | Cross-function and cross-contract reentrancy bypass single-function guards | Map ALL shared state across functions |
 | "This is an admin function, trust assumptions apply" | Admin key compromise is a real threat model. Admin functions need review too. | Assess admin powers and what a compromised key can do |
 | "The tests pass, so the logic is correct" | Tests verify intended behavior. Audits verify unintended behavior. | Ignore test results when evaluating security |
+| "Mocks pass, so the integration with the live contract works" | Mocks mirror your model of the external interface. If your model is wrong, mocks are wrong the same way and tests pass while mainnet reverts. | Verify every external boundary against the live deployment (cast call, fork test, build-artifact selector, etc). Trust live, not mocks. |
 | "This pattern looks safe" | Pattern recognition is not analysis. Context determines safety. | Trace the full data flow before concluding |
+| "The first dry-run error is the only bug" | Each error in a fork dry-run can hide the next one downstream. Stopping at the first masks deeper boundary bugs. | Drill all the way through the dry-run before declaring success or filing a single finding |
 
 ## Input
 
@@ -63,7 +67,7 @@ If $ARGUMENTS is empty or unclear:
 - If still unclear, use AskUserQuestion.
 
 **Flags** (parsed from $ARGUMENTS):
-- `--thorough` — run all 11 agents instead of auto-selected subset
+- `--thorough` — run all 12 agents instead of auto-selected subset
 - `--include-backend <path>` — include off-chain backend code in scope (Agent 8)
 - `--focus agent1,agent2,...` — run only named agents (e.g., `--focus reentrancy,signatures`)
 
@@ -130,9 +134,25 @@ Minimum 3 invariants per core function. Examples:
 
 Add the invariant list to the Contract Brief.
 
+### Step 0.4: Boundary Inventory
+
+For every external interaction the contract makes (CALL, STATICCALL, DELEGATECALL — including library functions, oracle reads, registry lookups, token transfers), spawn ONE agent to produce a structured boundary table.
+
+For each call site, document:
+
+| Call Site | Target Resolution | Selector | Argument Shape | Return Shape | Caller's Gating Logic |
+|-----------|-------------------|----------|----------------|--------------|-----------------------|
+| file.sol:line | Pinned constant / runtime registry / user-supplied | hardcoded 0x1234abcd / Solidity-typed call | struct fields in order | struct fields in order | branches based on returned value? |
+
+Every row is a potential boundary bug location. Address pinning + selector pinning + struct shape pinning are the three classes of "constants the caller assumes about the world" — every one of them must be verified against the live deployment.
+
+**Why this matters**: This is the inventory that Agent 12 (External Boundary Verification) operates against. Without it, the agent has no map. Every external interaction this contract makes is a place where reality might disagree with the pinned assumptions in source code, and mocks can't catch the disagreement.
+
+Add the boundary table to the Contract Brief.
+
 ### Step 0.5: Auto-select agents
 
-Based on the Contract Brief, select which agents to run. Default is 5-7 agents. Use all 11 only if `--thorough` is passed.
+Based on the Contract Brief, select which agents to run. Default is 5-7 agents. Use all 12 only if `--thorough` is passed.
 
 **Selection rules:**
 
@@ -149,12 +169,13 @@ Based on the Contract Brief, select which agents to run. Default is 5-7 agents. 
 | 9. Flash Loans | Contract has deposit/withdraw in same tx potential, or interacts with DeFi protocols |
 | 10. DoS/Griefing | Contract has multi-party flows where one party can block others |
 | 11. Privacy | Contract handles sensitive data or has public state that could leak business info |
+| 12. External Boundary | **Always when the boundary inventory is non-empty** — i.e., the contract makes ANY external call. The bug class (decoded struct shape mismatches, name-hash encoding drift, selector drift, native vs wrapped accounting blind spots, view DoS via strict revert on stale oracle) is invisible to mock-based testing by construction. |
 
 Print the selection:
 ```
-Selected agents: SWC Registry, Reentrancy, State Machine, ERC20, Economic (5 agents)
-Estimated time: ~4-6 minutes
-Use --thorough for all 11 agents, or --focus to pick specific ones.
+Selected agents: SWC Registry, Reentrancy, State Machine, ERC20, Economic, External Boundary (6 agents)
+Estimated time: ~5-7 minutes
+Use --thorough for all 12 agents, or --focus to pick specific ones.
 ```
 
 If `--focus` is passed, run only the named agents regardless of auto-selection.
@@ -203,7 +224,7 @@ forge build 2>&1
 
 ## Step 2: Spawn specialist agents
 
-Spawn the **auto-selected agents** (or all 11 if `--thorough`). Use `subagent_type: "general-purpose"` so they have tool access.
+Spawn the **auto-selected agents** (or all 12 if `--thorough`). Use `subagent_type: "general-purpose"` so they have tool access.
 
 **After each agent completes, immediately print a progress line:**
 ```
@@ -238,6 +259,7 @@ Each agent receives its specific playbook from [references/agent-playbooks.md](r
 9. **Flash Loans** — amplification, sandwich, atomic arbitrage, oracle manipulation
 10. **DoS/Griefing** — fund locking, reverting receiver, gas griefing, storage bloat
 11. **Privacy** — mempool visibility, identity correlation, storage slot reading
+12. **External Boundary** — canonical-fallback decode tests, live-fork ABI verification, selector / hash / constant verification against live deployments, view-liveness under degraded inputs, asset reconciliation invariants, native-vs-wrapped traps, library link verification
 
 ---
 
@@ -318,7 +340,7 @@ Use Grep to search for the pattern. Report any variants found as additional find
 
 Spawn ONE synthesis agent with:
 - The Contract Brief (including entry-point table and invariant list)
-- All agent outputs (only the selected agents, not all 11)
+- All agent outputs (only the selected agents, not all 12)
 - PoC test results (which exploits succeeded, which were blocked, which failed to compile)
 - FP-Check gate review results (which findings passed, which were downgraded/rejected)
 - Slither output (or "Slither not available" note)
@@ -426,3 +448,4 @@ These are patterns from actual mainnet exploits. Every agent should keep these i
 | Supply chain attack | Compromised signing UI / dependency | Bybit ($1.5B via Safe{Wallet} JS injection) |
 | Vault share inflation | First depositor manipulates share price | Multiple ERC-4626 vaults (2024) |
 | Transient storage reentrancy | EIP-1153 tstore/tload lock bypass | Emerging vector (2025+) |
+| External-boundary mismatch | Decoded struct shape / selector / name-hash diverges from live upstream; mocks pass, mainnet reverts or silently corrupts | FAsset Collateral LST (2026): wrong CollateralType.Data field order produced silent eligibility failures; FlareContractRegistry name lookups returned 0x0 due to keccak256(bytes(name)) vs keccak256(abi.encode(name)) drift |
