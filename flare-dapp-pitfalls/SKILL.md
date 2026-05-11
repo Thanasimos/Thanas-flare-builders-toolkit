@@ -191,6 +191,42 @@ catch { /* swallow */ }
 
 assume estimateGas will under-budget the outer call. Always pin gas on the frontend.
 
+### WNAT's transfer hooks are invisible to `eth_estimateGas`
+
+A related variant that doesn't need any `try/catch` to bite you. WNAT (`WFLR`,
+`WSGB`, `WC2FLR`) fires per-transfer vote-power hooks: every `transfer` and
+`transferFrom` calls `updateAtTokenTransfer` on each registered delegate /
+governance contract to refresh checkpoints. Those hooks consume real gas — often
+75k-200k per hook — and their cost depends on the recipient's delegation graph,
+which `eth_estimateGas` can't see through.
+
+Symptom: a contract whose execution path ends with `WNAT.transfer(user, amount)`
+runs cleanly through all its accounting and external calls, then OOGs inside the
+final WNAT transfer. The 63/64 rule kicks in at the tail: by the time the outer
+call has spent most of the budget on the upstream work, only a sliver is
+forwarded into WNAT's hooks. The first hook clears, the second OOGs, the whole
+tx reverts with no useful reason. Wallets under-estimate because the hook gas
+isn't reachable from a standard simulation.
+
+This matters anywhere your contract pays the user in wrapped-native at the end
+of a multi-step flow — vault redemptions, claim-and-forward patterns, batch
+exits that ultimately settle in WNAT. The fix is the same as the `try/catch`
+case: **pin outer gas on the frontend**. Default to 10M-12M on Flare/Songbird.
+
+```typescript
+writeContract({
+  address: vault,
+  abi,
+  functionName: "withdraw",
+  args: [assets, receiver, owner],
+  gas: 12_000_000n,   // ← absorbs WNAT vote-power hooks at the tail
+});
+```
+
+General rule: when pinning gas for any contract write, lean high. The downside
+of pinning too high is "wallet shows a slightly scary number"; the downside of
+pinning too low is "tx silently OOGs, user pays gas anyway, you ship a hotfix."
+
 ### `block.basefee` is essentially zero on cheap Flare-family chains
 
 Coston2 basefee = 1 wei. Songbird basefee = 2 wei. Flare basefee ≈ 25 gwei.
@@ -503,6 +539,7 @@ Both OAuth and the App install are required.
 | Multicall3 address | `0xcA11bde05977b3631167028862bE2a173976CA11` on Flare/Songbird/Coston2 |
 | Tx confirmed but did nothing | EIP-150 63/64 + `try/catch` + missing outer gas pin |
 | Wallet under-estimates a `try/catch` call | Pin `gas:` on the write; `eth_estimateGas` can't trace through |
+| Tx OOGs inside `WNAT.transfer` at the tail | Pin outer gas (10M-12M); vote-power hooks aren't traced by estimateGas |
 | `cancelOrder` reverts with `STF` | `vm.deal` corrupted WNAT checkpoint; use `WNAT.deposit()` |
 | FTSO claim returns 0 unexpectedly | Outer gas under-pinned, OR rewards stranded on rotated-away redistributor |
 | Anti-spam gate too lenient on cheap chain | Floor `block.basefee` at e.g. 25 gwei before sizing the gate |
