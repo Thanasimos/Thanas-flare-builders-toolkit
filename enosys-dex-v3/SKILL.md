@@ -2,7 +2,7 @@
 name: enosys-dex-v3
 description: >
   Deep reference skill for Enosys DEX V3 (CLMM) development on Flare Network.
-  Use this skill whenever Darren asks about: building tools or apps that interact
+  Use this skill whenever you are asked about: building tools or apps that interact
   with Enosys DEX V3 positions (LP position manager, burn tool, reward checker),
   contract addresses for the Enosys V3 position manager or reward system on Flare,
   how delegation rewards / FlareDrops / APS incentives / rFLR work and how to

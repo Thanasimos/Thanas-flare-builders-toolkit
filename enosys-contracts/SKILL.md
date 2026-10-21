@@ -2,7 +2,7 @@
 name: enosys-contracts
 description: >
   Essential reference skill for Enosys Global DeFi protocol development on the Flare Network and its related chains.
-  Use this skill whenever Darren asks about: interacting with Enosys smart contracts (DEX V2, DEX V3/CLMM, Loans/CDP,
+  Use this skill whenever you are asked about: interacting with Enosys smart contracts (DEX V2, DEX V3/CLMM, Loans/CDP,
   APYCloud, Governance), writing new Solidity contracts that integrate with Enosys products, building scripts or tools
   that call Enosys contract functions, understanding how Enosys products work internally, looking up contract addresses
   on Flare, Songbird, Coston1, or Coston2, understanding token addresses (HLN, APS, WFLR, FXRP, CDP, eUSDT, etc.),
