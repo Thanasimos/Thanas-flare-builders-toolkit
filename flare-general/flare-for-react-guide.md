@@ -6,7 +6,7 @@ How to build React dApps on Flare using wagmi, viem, and the `@flarenetwork/flar
 
 ## Prerequisites
 
-- Node.js v18+
+- Node.js 22.23.4+ or 24.22.1+ (the October 2026 security releases)
 - npm
 
 ## Setup
