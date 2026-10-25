@@ -7,7 +7,7 @@ How to interact with Flare smart contracts using JavaScript and web3.js.
 
 ## Prerequisites
 
-- Node.js v18+
+- Node.js 22.23.4+ or 24.22.1+ (the October 2026 security releases)
 - Solidity compiler (`solc`)
 - web3.js
 

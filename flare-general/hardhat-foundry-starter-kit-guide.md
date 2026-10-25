@@ -17,7 +17,7 @@ Both include FTSO, FDC, FAssets, and Smart Accounts examples.
 
 ### Prerequisites
 
-- Node.js v18+
+- Node.js 22.23.4+ or 24.22.1+ (the October 2026 security releases)
 - npm or yarn
 - Optional: [Hardhat for VS Code](https://hardhat.org/hardhat-vscode/docs/overview)
 

@@ -7,7 +7,7 @@ How to interact with Flare smart contracts using Go and go-ethereum.
 
 ## Prerequisites
 
-- Go 1.21+
+- Go 1.26.10+ or 1.27.3+ (the October 2026 security releases)
 - Geth and Solidity compiler (`solc`)
 
 ### Install Geth & Solidity Compiler
